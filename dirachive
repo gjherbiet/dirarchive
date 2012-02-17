@@ -1,0 +1,211 @@
+#!/bin/bash
+##############################################################################
+# File   : dirarchive
+# Author : Guillaume-Jean Herbiet  <guillaume-jean@herbiet.net>
+#
+#
+# Copyright (c) 2012 Guillaume-Jean Herbiet     (http://herbiet.net)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Guillaume-Jean Herbiet
+# <guillaume-jean@herbiet.net>
+#
+##############################################################################
+
+VERSION="0.1"
+function version {
+	echo "This is $(basename $0) v. $VERSION"
+	echo "Copyright (c) 2012 Guillaume-Jean Herbiet  (http://herbiet.net)"
+	echo "This is free software; see the source for copying conditions. There is NO"
+	echo "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+}
+
+#
+# Output functions
+#
+function ohai {
+	echo -e "\033[1;34m==> \033[0m"$@
+}
+function oops {
+	echo -e "\033[0;33m/!\ \033[0m"$@
+}
+function onoe {
+	echo -e "\033[1;31m!!! \033[0m"$@
+}
+
+#
+#
+#
+VERBOSE=
+DEBUG=
+DRY_RUN=
+USERNAME=$(whoami)
+DIRECTORY="/Users/$USERNAME/Downloads"
+ARCHIVE_DIRECTORY="/Users/$USERNAME/Archive"
+SHIFT="30d"
+
+#
+# Check that required elements are in the path
+#
+GETOPT_CMD=$(which getopt)
+GREP_CMD=$(which grep)
+MDLS_CMD=$(which mdls)
+DATE_CMD=$(which date)
+ZIP_CMD=$(which zip)
+if [[ ! $GETOPT_CMD || ! $GREP_CMD || ! $MDLS_CMD || ! $DATE_CMD ]]; then
+	onoe "This program requires 'getopt', 'grep', 'mdls'"
+	onoe "(date' and 'zip' utilities to be in your path."
+	exit 1
+fi
+
+#
+# Setup the required tools
+#
+GETOPT_VERSION=$($GETOPT_CMD -V | $GREP_CMD "enhanced")
+GNU_DATE=$($DATE_CMD --version 2> /dev/null | $GREP_CMD "GNU")
+
+function usage {
+	cat<<EOF
+$(basename $0) [-h|--help] [-V|--version] [-d|--debug] [-v|--verbose] [-N|--dry-run]
+    [-a|--archive <archive_dir>] [-p|--period <N[y|m|d|h|m|s]>]
+    [directory]
+
+  Archive directory content based on the "Date Added" value of the file.
+  All files of the directory with a date added older than the specified
+  period will be moved to an archived placed at the specified location.
+
+  Note: If your system has the non-enhanced version of 'getopt' (which is the
+  case by default on BSD systems, including Mac OS), only the short version
+  of the following options are available.
+
+    --help, -h       : Print this help, then exit.
+    --version, -V    : Print the software version, then exit.
+    --debug, -d      : Extended information about the script function.
+    --verbose, -v    : Display a summary of the executed operations.
+    --dry-run, -N    : Do not perform any actual action
+
+    --archive, -a    : Specifies the directory where the archive will be saved
+                       (default: '/Users/$USERNAME/Archive')
+    --period, -p     : Specifies the period for which files are kept
+                       (default: "30d" for 30 days)
+EOF
+}
+
+if [ "$GETOPT_VERSION" == "enhanced" ]; then
+	args=`$GETOPT_CMD -u -o hdvVa:p:N -l help,debug,verbose,version,archive:,period:,dry-run -- $*`
+else
+	args=`$GETOPT_CMD hdvVa:p:N $*`
+fi
+
+#
+# Parse arguments
+#
+set -- $args
+while true; do
+	case "$1"
+	in
+		-h|--help)
+			usage
+			exit 0
+			;;
+		-d|--debug)
+			echo "Debug mode ON"
+			DEBUG=1
+			VERBOSE=1
+			shift
+			;;
+		-v|--verbose)
+			if [ ! $VERBOSE ]; then
+				echo "Verbose mode ON"
+				VERBOSE=1
+			fi
+			shift
+			;;
+		-V|--version)
+			version
+			exit 0
+			;;
+		-a|--archive)
+			ARCHIVE_DIRECTORY=$2;
+			shift 2
+			;;
+		-p|--period)
+			SHIFT=$2;
+			shift 2
+			;;
+		-N|--dry-run)
+			echo "Dry run mode ON"
+			DEBUG=1
+			VERBOSE=1
+			DRY_RUN=1
+			shift
+			;;
+		--)
+			shift; break
+			;;
+		*)
+			onoe "Internal error!"
+			exit 2
+			;;
+	esac
+done
+
+if [ ! -z $1 ]; then
+	[ $DEBUG ] && echo "Directory set to '$1'"
+	DIRECTORY=$1
+fi
+
+#
+# Core function
+#
+
+# Create the archive directory
+[ $DEBUG ] && echo "Testing for archive directory set to '$ARCHIVE_DIRECTORY'"
+[ $DRY_RUN ] || [ -d "$ARCHIVE_DIRECTORY" ] || \
+	(mkdir -p "$ARCHIVE_DIRECTORY" &&  ohai "Creating '$ARCHIVE_DIRECTORY'") || \
+	(onoe "Error in creating '$ARCHIVE_DIRECTORY': $!" && exit 2)
+
+# Set the archive name
+ARCHIVE_NAME=$($DATE_CMD "+Archive_%Y-%m-%d_%Hh%Ms%Ss.zip")
+[ $DEBUG ] && echo "Archive name set to '$ARCHIVE_NAME'"
+
+# Set the maximum allowed timestamp
+# representing the current date minus the given shift
+BOUNDARY_TIMESTAMP=$($DATE_CMD -v "-$SHIFT" "+%s")
+[ $DEBUG ] && echo "Boundary timestamp set to $BOUNDARY_TIMESTAMP"
+
+# Iterate through all files
+ohai "Exploring '$DIRECTORY'"
+ls "$DIRECTORY" | while read FILE; do
+	[ $VERBOSE ] && echo "Examining '$FILE'"
+
+	# Get the "Date added" value and convert it to a timestamp
+	RAW_DATE_ADDED=$($MDLS_CMD -name kMDItemDateAdded -raw "$DIRECTORY/$FILE")
+	TIMESTAMP_ADDED=$($DATE_CMD -j -f "%Y-%m-%d %H:%M:%S %z" "$RAW_DATE_ADDED" "+%s")
+	[ $DEBUG ] && echo "Date added is $RAW_DATE_ADDED"
+	[ $DEBUG ] && echo "Timestamp  is $TIMESTAMP_ADDED"
+	
+	# Do process for all regular files older than the maximum allowed timestamp
+	if [[ $TIMESTAMP_ADDED -lt $BOUNDARY_TIMESTAMP && -f "$DIRECTORY/$FILE" ]]; then
+		[ $VERBOSE ] && echo "Archiving '$FILE'"
+
+		[ $DRY_RUN ] || $ZIP_CMD -j "$ARCHIVE_DIRECTORY/$ARCHIVE_NAME" "$DIRECTORY/$FILE" || \
+		oops "Error in adding '$DIRECTORY/$FILE' to archive '$ARCHIVE_DIRECTORY/$ARCHIVE_NAME': $!"
+
+		[ $DEBUG ] && "Deleting '$FILE'"
+		[ $DRY_RUN ] || echo rm -f "$DIRECTORY/$FILE" || oops "Error in deleting '$DIRECTORY/$FILE': $!"
+	fi
+	
+done

@@ -54,6 +54,7 @@ DRY_RUN=
 USERNAME=$(whoami)
 DIRECTORY="/Users/$USERNAME/Downloads"
 DESTINATION_DIRECTORY="/Users/$USERNAME/Archive"
+DO_ARCHIVE=
 SHIFT="30d"
 
 #
@@ -66,7 +67,7 @@ DATE_CMD=$(which date)
 ZIP_CMD=$(which zip)
 if [[ ! $GETOPT_CMD || ! $GREP_CMD || ! $MDLS_CMD || ! $DATE_CMD ]]; then
 	onoe "This program requires 'getopt', 'grep', 'mdls'"
-	onoe "(date' and 'zip' utilities to be in your path."
+	onoe "and 'date' utilities to be in your path."
 	exit 1
 fi
 
@@ -80,7 +81,7 @@ function usage {
 	cat<<EOF
 $(basename $0) [-h|--help] [-V|--version] [-D|--debug] [-v|--verbose] [-N|--dry-run]
     [-d|--directory <dest_directory>] [-p|--period <N[y|m|d|h|m|s]>]
-    [src_directory]
+    [-a|--archive] [src_directory]
 
   Archive directory content based on the "Date Added" value of the file.
   All files of the directory with a date added older than the specified
@@ -100,13 +101,15 @@ $(basename $0) [-h|--help] [-V|--version] [-D|--debug] [-v|--verbose] [-N|--dry-
                        (default: '/Users/$USERNAME/Archive')
     --period, -p     : Specifies the period for which files are kept
                        (default: "30d" for 30 days)
+    --archive, a     : Create a Zip archive instead of a subdirectory at
+                       destination.
 EOF
 }
 
 if [ "$GETOPT_VERSION" == "enhanced" ]; then
-	args=`$GETOPT_CMD -u -o hDvVd:p:N -l help,debug,verbose,version,directory:,period:,dry-run -- $*`
+	args=`$GETOPT_CMD -u -o hDvVd:p:Na -l help,debug,verbose,version,directory:,period:,dry-run,archive -- $*`
 else
-	args=`$GETOPT_CMD hDvVd:p:N $*`
+	args=`$GETOPT_CMD hDvVd:p:Na $*`
 fi
 
 #
@@ -152,6 +155,16 @@ while true; do
 			DRY_RUN=1
 			shift
 			;;
+		-a|--archive)
+			if [ ! $ZIP_CMD ]; then
+				onoe "The '-a|--archive option requires the utility 'zip' to be in your path."
+				exit 1
+			fi
+			if [ $VERBOSE ]; then
+				echo "Archiving selected files."
+			fi
+			DO_ARCHIVE=1
+			;;
 		--)
 			shift; break
 			;;
@@ -171,15 +184,23 @@ fi
 # Core function
 #
 
-# Create the archive directory
+# Create the destination directory if required
 [ $DEBUG ] && echo "Testing for archive directory set to '$DESTINATION_DIRECTORY'"
 [ $DRY_RUN ] || [ -d "$DESTINATION_DIRECTORY" ] || \
 	(mkdir -p "$DESTINATION_DIRECTORY" &&  ohai "Creating '$DESTINATION_DIRECTORY'") || \
 	(onoe "Error in creating '$DESTINATION_DIRECTORY': $!" && exit 2)
 
-# Set the archive name
-ARCHIVE_NAME=$($DATE_CMD "+Archive_%Y-%m-%d_%Hh%Ms%Ss.zip")
-[ $DEBUG ] && echo "Archive name set to '$ARCHIVE_NAME'"
+# Set the destination name
+DESTINATION_NAME=$($DATE_CMD "+Archive_%Y-%m-%d_%Hh%Ms%Ss")
+[ $DEBUG ] && echo "Destination name set to '$DESTINATION_NAME'"
+
+# Create the destination subdir if we don't do archive
+if [ ! $DO_ARCHIVE ]; then
+	[ $DRY_RUN ] || [ -d "$DESTINATION_DIRECTORY/$DESTINATION_NAME" ] || \
+		(mkdir -p "$DESTINATION_DIRECTORY/$DESTINATION_NAME" && 
+			ohai "Creating '$DESTINATION_DIRECTORY/$DESTINATION_NAME'") || \
+		(onoe "Error in creating '$DESTINATION_DIRECTORY/$DESTINATION_NAME': $!" && exit 2)
+fi
 
 # Set the maximum allowed timestamp
 # representing the current date minus the given shift
@@ -200,12 +221,19 @@ ls "$DIRECTORY" | while read FILE; do
 	# Do process for all regular files older than the maximum allowed timestamp
 	if [[ $TIMESTAMP_ADDED -lt $BOUNDARY_TIMESTAMP && -f "$DIRECTORY/$FILE" ]]; then
 		[ $VERBOSE ] && echo "Archiving '$FILE'"
-
-		[ $DRY_RUN ] || $ZIP_CMD -j "$DESTINATION_DIRECTORY/$ARCHIVE_NAME" "$DIRECTORY/$FILE" || \
-		oops "Error in adding '$DIRECTORY/$FILE' to archive '$DESTINATION_DIRECTORY/$ARCHIVE_NAME': $!"
-
-		[ $DEBUG ] && "Deleting '$FILE'"
-		[ $DRY_RUN ] || echo rm -f "$DIRECTORY/$FILE" || oops "Error in deleting '$DIRECTORY/$FILE': $!"
+		
+		# We do archive : add the file to the archive and delete it
+		if [ $DO_ARCHIVE ]; then
+			[ $DRY_RUN ] || $ZIP_CMD -j "$DESTINATION_DIRECTORY/$DESTINATION_NAME.zip" "$DIRECTORY/$FILE" || \
+				oops "Error in adding '$DIRECTORY/$FILE' to archive '$DESTINATION_DIRECTORY/$DESTINATION_NAME.zip': $!"
+			[ $DEBUG ] && "Deleting '$FILE'"
+			[ $DRY_RUN ] || echo rm -f "$DIRECTORY/$FILE" || oops "Error in deleting '$DIRECTORY/$FILE': $!"
+		
+		# We don't do archive : simply move the file to the destination directory
+		else
+			[ $DRY_RUN ] || mv "$DIRECTORY/$FILE" "$DESTINATION_DIRECTORY/$DESTINATION_NAME"  || \
+				oops "Error in moving '$DIRECTORY/$FILE' to '$DESTINATION_DIRECTORY/$DESTINATION_NAME': $!"
+		fi
 	fi
 	
 done

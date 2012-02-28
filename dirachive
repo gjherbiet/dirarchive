@@ -53,7 +53,7 @@ DEBUG=
 DRY_RUN=
 USERNAME=$(whoami)
 DIRECTORY="/Users/$USERNAME/Downloads"
-ARCHIVE_DIRECTORY="/Users/$USERNAME/Archive"
+DESTINATION_DIRECTORY="/Users/$USERNAME/Archive"
 SHIFT="30d"
 
 #
@@ -78,13 +78,13 @@ GNU_DATE=$($DATE_CMD --version 2> /dev/null | $GREP_CMD "GNU")
 
 function usage {
 	cat<<EOF
-$(basename $0) [-h|--help] [-V|--version] [-d|--debug] [-v|--verbose] [-N|--dry-run]
-    [-a|--archive <archive_dir>] [-p|--period <N[y|m|d|h|m|s]>]
-    [directory]
+$(basename $0) [-h|--help] [-V|--version] [-D|--debug] [-v|--verbose] [-N|--dry-run]
+    [-d|--directory <dest_directory>] [-p|--period <N[y|m|d|h|m|s]>]
+    [src_directory]
 
   Archive directory content based on the "Date Added" value of the file.
   All files of the directory with a date added older than the specified
-  period will be moved to an archived placed at the specified location.
+  period will be moved to the specified location.
 
   Note: If your system has the non-enhanced version of 'getopt' (which is the
   case by default on BSD systems, including Mac OS), only the short version
@@ -92,11 +92,11 @@ $(basename $0) [-h|--help] [-V|--version] [-d|--debug] [-v|--verbose] [-N|--dry-
 
     --help, -h       : Print this help, then exit.
     --version, -V    : Print the software version, then exit.
-    --debug, -d      : Extended information about the script function.
+    --debug, -D      : Extended information about the script function.
     --verbose, -v    : Display a summary of the executed operations.
     --dry-run, -N    : Do not perform any actual action
 
-    --archive, -a    : Specifies the directory where the archive will be saved
+    --directory, -d  : Specifies the directory where the files will be saved
                        (default: '/Users/$USERNAME/Archive')
     --period, -p     : Specifies the period for which files are kept
                        (default: "30d" for 30 days)
@@ -104,9 +104,9 @@ EOF
 }
 
 if [ "$GETOPT_VERSION" == "enhanced" ]; then
-	args=`$GETOPT_CMD -u -o hdvVa:p:N -l help,debug,verbose,version,archive:,period:,dry-run -- $*`
+	args=`$GETOPT_CMD -u -o hDvVd:p:N -l help,debug,verbose,version,directory:,period:,dry-run -- $*`
 else
-	args=`$GETOPT_CMD hdvVa:p:N $*`
+	args=`$GETOPT_CMD hDvVd:p:N $*`
 fi
 
 #
@@ -120,7 +120,7 @@ while true; do
 			usage
 			exit 0
 			;;
-		-d|--debug)
+		-D|--debug)
 			echo "Debug mode ON"
 			DEBUG=1
 			VERBOSE=1
@@ -137,8 +137,8 @@ while true; do
 			version
 			exit 0
 			;;
-		-a|--archive)
-			ARCHIVE_DIRECTORY=$2;
+		-d|--directory)
+			DESTINATION_DIRECTORY=$2;
 			shift 2
 			;;
 		-p|--period)
@@ -172,10 +172,10 @@ fi
 #
 
 # Create the archive directory
-[ $DEBUG ] && echo "Testing for archive directory set to '$ARCHIVE_DIRECTORY'"
-[ $DRY_RUN ] || [ -d "$ARCHIVE_DIRECTORY" ] || \
-	(mkdir -p "$ARCHIVE_DIRECTORY" &&  ohai "Creating '$ARCHIVE_DIRECTORY'") || \
-	(onoe "Error in creating '$ARCHIVE_DIRECTORY': $!" && exit 2)
+[ $DEBUG ] && echo "Testing for archive directory set to '$DESTINATION_DIRECTORY'"
+[ $DRY_RUN ] || [ -d "$DESTINATION_DIRECTORY" ] || \
+	(mkdir -p "$DESTINATION_DIRECTORY" &&  ohai "Creating '$DESTINATION_DIRECTORY'") || \
+	(onoe "Error in creating '$DESTINATION_DIRECTORY': $!" && exit 2)
 
 # Set the archive name
 ARCHIVE_NAME=$($DATE_CMD "+Archive_%Y-%m-%d_%Hh%Ms%Ss.zip")
@@ -201,8 +201,8 @@ ls "$DIRECTORY" | while read FILE; do
 	if [[ $TIMESTAMP_ADDED -lt $BOUNDARY_TIMESTAMP && -f "$DIRECTORY/$FILE" ]]; then
 		[ $VERBOSE ] && echo "Archiving '$FILE'"
 
-		[ $DRY_RUN ] || $ZIP_CMD -j "$ARCHIVE_DIRECTORY/$ARCHIVE_NAME" "$DIRECTORY/$FILE" || \
-		oops "Error in adding '$DIRECTORY/$FILE' to archive '$ARCHIVE_DIRECTORY/$ARCHIVE_NAME': $!"
+		[ $DRY_RUN ] || $ZIP_CMD -j "$DESTINATION_DIRECTORY/$ARCHIVE_NAME" "$DIRECTORY/$FILE" || \
+		oops "Error in adding '$DIRECTORY/$FILE' to archive '$DESTINATION_DIRECTORY/$ARCHIVE_NAME': $!"
 
 		[ $DEBUG ] && "Deleting '$FILE'"
 		[ $DRY_RUN ] || echo rm -f "$DIRECTORY/$FILE" || oops "Error in deleting '$DIRECTORY/$FILE': $!"
